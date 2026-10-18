@@ -3,7 +3,7 @@ import Logger from "./Logger.js";
 import { getRequestHeaders } from '../../../../script.js';
 
 // 远程仓库配置 - 需要根据实际仓库地址修改
-const REPO_ROOT = "https://raw.githubusercontent.com/uhhhh15/hide/main";
+const REPO_ROOT = "https://raw.githubusercontent.com/hsgpower/hide/main";
 const MANIFEST_URL = `${REPO_ROOT}/manifest.json`;
 const CHANGELOG_URL = `${REPO_ROOT}/CHANGELOG.md`;
 

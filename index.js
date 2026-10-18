@@ -1,8 +1,9 @@
 // index.js (使用 extension_settings 存储并包含自动迁移，优化了初始化)
 import { extension_settings, loadExtensionSettings, getContext } from "../../../extensions.js";
 import Logger from "./Logger.js";
+import { parseFloorRanges, formatFloorRanges, includesFloor, getExistingFloors } from "./floor-ranges.js";
 // 尝试导入全局列表，路径可能需要调整！如果导入失败，迁移逻辑需要改用 API 调用
-import { saveSettings, saveSettingsDebounced, eventSource, event_types, getRequestHeaders, characters, scrollChatToBottom, Generate, stopGeneration, is_send_press } from "../../../../script.js";
+import { saveSettings, saveSettingsDebounced, saveChatDebounced, eventSource, event_types, getRequestHeaders, characters, scrollChatToBottom, Generate, stopGeneration, is_send_press } from "../../../../script.js";
 
 import { groups } from "../../../group-chats.js";
 import { power_user } from "../../../power-user.js";
@@ -26,6 +27,7 @@ const defaultSettings = {
     useGlobalSettings: false,
     globalHideSettings: {
         hideLastN: null,
+        alwaysVisibleFloors: '',
         lastProcessedLength: 0,
         userConfigured: false
     },
@@ -602,6 +604,15 @@ function createPopup() {
                         当前隐藏楼层功能已禁用
                     </div>
 
+                    <div class="hide-floor-section">
+                        <label for="hide-unhide-floors" class="hide-helper-label">取消指定楼层隐藏</label>
+                        <div class="hide-floor-action-row">
+                            <input type="text" id="hide-unhide-floors" class="hide-floor-input" placeholder="例如：0, 3, 8-12" aria-describedby="hide-unhide-floors-help">
+                            <button id="hide-unhide-floors-btn" class="hide-helper-btn" type="button">取消隐藏</button>
+                        </div>
+                        <p id="hide-unhide-floors-help" class="hide-settings-tip">仅本次取消隐藏，不更改自动隐藏规则。长期保留请填写“指定楼层始终不隐藏”。楼层从 0 开始，范围包含两端。</p>
+                    </div>
+
                     <div id="hide-settings-wrapper">
                         <div class="hide-helper-section hide-last-n-section">
                             <label class="hide-helper-label">保留最新的N条消息，并隐藏其余旧楼层</label>
@@ -610,6 +621,11 @@ function createPopup() {
                         <div class="hide-helper-current">
                             <strong id="hide-status-text">当前保留楼层数:</strong>
                             <span id="hide-current-value">无</span>
+                        </div>
+                        <div class="hide-floor-section">
+                            <label for="hide-always-visible-floors" class="hide-helper-label">指定楼层始终不隐藏</label>
+                            <input type="text" id="hide-always-visible-floors" class="hide-floor-input" placeholder="例如：0, 3, 8-12；留空则不设置例外" aria-describedby="hide-always-visible-floors-help">
+                            <p id="hide-always-visible-floors-help" class="hide-settings-tip">楼层从 0 开始，范围包含两端。指定楼层额外保留，不占用最新 N 条的名额；失去焦点或按回车自动保存。配置随下方模式保存，删除消息后按新的楼层编号生效。</p>
                         </div>
                         <div class="hide-helper-mode-switch">
                             <div class="label-group">
@@ -631,7 +647,7 @@ function createPopup() {
                         <div class="hide-panel-instructions">
                             <h3 id="hide-panel-instructions-title">使用说明</h3>
                             <div class="instructions-content">
-                                <p class="important-note"><strong>启用该隐藏楼层功能后，酒馆将始终只发送最近N条楼层给AI，而N条目楼层之外的消息将会始终自动隐藏。</strong></p>
+                                <p class="important-note"><strong>启用该隐藏楼层功能后，插件保留最近 N 条消息，以及“指定楼层始终不隐藏”中的楼层；其余旧楼层自动隐藏。</strong></p>
                                 <p><strong>1. 前提说明</strong></p>
                                 <p>在使用"自动隐藏"功能前，请务必确认以下配置：</p>
                                 <ul>
@@ -641,10 +657,12 @@ function createPopup() {
                                 </ul>
 
                                 <p><strong>2. 使用说明</strong></p>
-                                <p>设置保留楼层数 <strong>N</strong> 并启用功能后，插件会始终自动隐藏最近 N 楼之外的所有消息。</p>
+                                <p>设置保留楼层数 <strong>N</strong> 并启用功能后，插件会自动隐藏最近 N 楼之外、且未指定始终保留的消息。</p>
                                 <ul>
                                     <li><strong>示例</strong>：设置保留最近 <strong>1</strong> 楼。</li>
-                                    <li><strong>效果</strong>：若当前共有第 0 楼至第 9 楼消息，插件将自动隐藏第 0 至第 8 楼，仅将最新的第 9 楼消息发送给 AI。</li>
+                                    <li><strong>效果</strong>：若当前共有第 0 楼至第 9 楼消息，未设置例外时仅保留第 9 楼；若“指定楼层始终不隐藏”填写 <strong>0, 3-4</strong>，则保留第 0、3、4、9 楼。</li>
+                                    <li><strong>楼层格式</strong>：支持单个楼层、范围和混合列表，例如 <strong>0, 3, 8-12</strong>，也支持中文逗号。楼层从 0 开始，范围包含两端，超出当前聊天的编号会在该楼层出现后生效。</li>
+                                    <li><strong>一次性取消隐藏</strong>：在“取消指定楼层隐藏”中输入楼层或范围，再点击“取消隐藏”。该操作不修改 N 和长期保留列表；下一次自动检查仍按原规则处理。</li>
                                 </ul>
 
                                 <p><strong>3. 立即将当前聊天所有楼层取消隐藏</strong></p>
@@ -658,15 +676,15 @@ function createPopup() {
                                 <p><strong>4. 模式选择</strong></p>
                                 <p>插件提供两种配置模式，建议根据使用习惯选择：</p>
                                 <ul>
-                                    <li><strong>全局模式（推荐）</strong>：只需设置一次【保留的楼层数】。该数值将应用于所有角色，切换角色无需重新配置，简单方便。</li>
-                                    <li><strong>角色模式</strong>：需要为每个角色卡单独设置【保留的楼层数】。注意：若某个角色未设置数值（数值为空），则该角色的自动隐藏功能不会生效。</li>
+                                    <li><strong>全局模式（推荐）</strong>：保留数量和始终不隐藏的楼层列表应用于所有角色及群聊。</li>
+                                    <li><strong>角色模式</strong>：为每个角色卡或群组分别保存保留数量和楼层列表。同一角色的不同聊天共用配置；若未设置 N，则自动隐藏不生效。</li>
                                 </ul>
 
                                 <p><strong>5. 注意事项与兼容性</strong></p>
                                 <ul>
                                     <li><strong>正则冲突</strong>：该功能与"隐藏楼层正则"冲突，请确保仅开启其中一个。</li>
                                     <li><strong>插件冲突</strong>：若其他插件/脚本也具备自动隐藏功能，请仅启用其中一个，避免运行逻辑打架。</li>
-                                    <li><strong>核心原理</strong>：在没有其他脚本干预的情况下，本插件能确保仅发送最近 N 条消息。除了执行隐藏操作外，插件还会从底层<strong>直接截断发送的上下文</strong>，从根本上保证发送的消息层数符合设定。</li>
+                                    <li><strong>核心原理</strong>：通过酒馆的消息隐藏状态控制哪些楼层可进入上下文。指定保留的楼层不占用最新 N 条的名额，最终请求仍受酒馆的上下文长度等设置影响。</li>
                                 </ul>
                             </div>
                         </div>
@@ -755,31 +773,31 @@ function createPopup() {
 
                         <h2>隐藏楼层 (功能一)</h2>
                         <p>
-                           此功能的核心是：在每次与AI交互时，仅发送最新的N条消息作为上下文，并自动隐藏其余的旧消息。
+                           此功能保留最新的 N 条消息和指定始终不隐藏的楼层，并自动隐藏其余旧消息。
                         </p>
                         <p class="important">
-                            <i class="fa-solid fa-shield-halved"></i> <strong>双重保护机制：</strong>本插件同时使用“消息隐藏”和“请求拦截”两种方式确保旧消息不会被发送给AI。即使某些消息楼层因特殊原因未能生效（例如被其他插件/脚本的隐藏功能覆盖），拦截机制仍会在API请求发出前强制截断消息列表，作为最终兜底保障，确保实际上发送的消息楼层真的只有最近N条消息楼层。
+                            <i class="fa-solid fa-shield-halved"></i> <strong>保留规则：</strong>始终不隐藏的楼层优先于自动隐藏规则。已被隐藏的指定楼层会在应用配置时恢复；未指定的旧楼层继续自动隐藏。
                         </p>
                         <p>
-                            在输入框中填入您想 <strong>保留的最新消息楼层数量</strong> (例如 <code>4</code>)，然后点击 <span class="button-like">保存设置</span> 按钮。插件便会立即生效，隐藏设定范围之外的所有内容。
+                            填入 <strong>保留的最新消息楼层数量</strong>（例如 <code>4</code>），按回车或移开焦点即可自动保存。需要长期保留的旧楼层可填入“指定楼层始终不隐藏”，例如 <code>0, 3, 8-12</code>。
                         </p>
                         <p>
-                            <strong>示例：</strong> 假设当前聊天共有10条消息。您输入 <code>4</code> 并保存，则最新的4条消息会发送给AI，而之前的6条消息将不会发生给AI。当您或AI发送新消息后，插件会自动调整，确保始终只有最新的4条消息是未隐藏的，而之前的消息楼层则始终是隐藏的。
+                            <strong>示例：</strong> 当前聊天有第 0 至 9 楼，N 为 <code>4</code>，始终不隐藏填写 <code>0, 3</code>，则保留第 0、3、6、7、8、9 楼。新消息到来后，最近 4 条的范围向后移动，第 0、3 楼仍会保留。
                         </p>
                         <h3>全局模式 vs 角色模式</h3>
                         <p>
                             您可以通过弹窗中的 <strong>拨动开关</strong> 在两种模式间轻松切换：
                             <ul>
-                                <li><strong>全局模式：</strong> 在此模式下，您设置的保留数量将应用于 <strong>所有</strong> 角色卡和群聊。一次设置，处处生效。</li>
-                                <li><strong>角色模式：</strong> 在此模式下，设置将 <strong>仅</strong> 绑定到当前角色。您可以为每个角色或群聊设定并保存一个独立的保留数量。</li>
+                                <li><strong>全局模式：</strong> 保留数量和始终不隐藏列表应用于 <strong>所有</strong> 角色卡和群聊。</li>
+                                <li><strong>角色模式：</strong> 保留数量和始终不隐藏列表绑定到当前角色或群组，同一角色的不同聊天共用配置。</li>
                             </ul>
                         </p>
                          <h3>取消隐藏</h3>
                          <p>
-                            点击 <span class="button-like">取消隐藏</span> 按钮后，插件会立刻将当前聊天的楼层全部取消楼层一遍，并且将保留楼层的N值置空，置空状态下自动隐藏功能将不会生效。
+                            在“取消指定楼层隐藏”中填写楼层或范围并点击 <span class="button-like">取消隐藏</span>，只恢复指定消息，不更改自动隐藏设置；下一次自动检查仍按原规则处理。点击 <span class="button-like">立即将当前聊天所有楼层取消隐藏</span> 则恢复全部消息并清空 N，保留始终不隐藏列表供下次启用时使用。
                         </p>
                         <p class="important">
-                            <i class="fa-solid fa-circle-info"></i> 被隐藏的消息 <strong>不会</strong> 被包含在发送给AI的上下文中。这意味着AI无法“看到”这些N楼之前的消息，这对于控制上下文长度和节省tokens非常有帮助。
+                            <i class="fa-solid fa-circle-info"></i> 被隐藏的消息 <strong>不会</strong> 被包含在发送给AI的上下文中。始终不隐藏的楼层可参与上下文，最终发送内容仍受酒馆的上下文长度和其他提示词设置影响。
                         </p>
 
                         <h2>限制楼层 (功能2)</h2>
@@ -850,7 +868,7 @@ function getCurrentHideSettings() {
 }
 
 // 保存当前隐藏设置 (到全局 extension_settings)
-function saveCurrentHideSettings(hideLastN) {
+function saveCurrentHideSettings(hideLastN, alwaysVisibleFloors = getCurrentHideSettings()?.alwaysVisibleFloors ?? '') {
     Logger.debug('');
     Logger.debug('💾💾💾【保存隐藏设置】开始 💾💾💾');
 
@@ -875,6 +893,7 @@ function saveCurrentHideSettings(hideLastN) {
 
     const settingsToSave = {
         hideLastN: (hideLastN !== null && hideLastN > 0) ? hideLastN : null,
+        alwaysVisibleFloors,
         lastProcessedLength: chatLength,
         userConfigured: true
     };
@@ -944,6 +963,7 @@ function updateCurrentHideSettingsDisplay() {
 
     // 更新输入框 (0 或空都显示为空)
     $input.val(currentHideSettings?.hideLastN > 0 ? currentHideSettings.hideLastN : '');
+    $('#hide-always-visible-floors').val(currentHideSettings?.alwaysVisibleFloors ?? '');
 
     // 更新模式切换 UI
     const useGlobal = extension_settings[extensionName]?.useGlobalSettings || false;
@@ -981,7 +1001,7 @@ function updateCurrentHideSettingsDisplay() {
 // 防抖函数
 function debounce(fn, delay) {
     let timer;
-    return function(...args) {
+    const debounced = function(...args) {
         Logger.debug(`防抖: 清除 ${fn.name} 的计时器`);
         clearTimeout(timer);
         Logger.debug(`防抖: 为 ${fn.name} 设置 ${delay}ms 计时器`);
@@ -990,27 +1010,95 @@ function debounce(fn, delay) {
             fn.apply(this, args);
         }, delay);
     };
+    debounced.cancel = () => clearTimeout(timer);
+    return debounced;
 }
 
 
 // 防抖版本的全量检查
 const runFullHideCheckDebounced = debounce(runFullHideCheck, 200);
 
-// 自动保存防抖
-const saveSettingsAutoDebounced = debounce(() => {
-    const val = parseInt($('#hide-last-n').val());
-    if (val > 0) {
-        saveCurrentHideSettings(val);
-        runFullHideCheckDebounced();
-        updateCurrentHideSettingsDisplay();
-    } else if (val === 0) {
+// 失焦时同步保存，避免延迟任务在切换角色/模式后写入错误的设置。
+function saveHideSettingsFromInputs() {
+    const rawN = String($('#hide-last-n').val() ?? '').trim();
+    const val = rawN === '' ? null : Number(rawN);
+    if (val !== null && (!Number.isSafeInteger(val) || val < 0)) {
+        toastr.error('保留楼层数 N 必须是非负整数。');
+        return false;
+    }
+
+    let ranges;
+    try {
+        ranges = parseFloorRanges($('#hide-always-visible-floors').val() ?? '');
+    } catch (error) {
+        toastr.error(error.message);
+        return false;
+    }
+    const alwaysVisibleFloors = formatFloorRanges(ranges);
+    const hideLastN = val > 0 ? val : null;
+    const current = getCurrentHideSettings();
+    const changed = hideLastN !== (current?.hideLastN ?? null)
+        || alwaysVisibleFloors !== (current?.alwaysVisibleFloors ?? '');
+    if (changed && !saveCurrentHideSettings(hideLastN, alwaysVisibleFloors)) return false;
+    $('#hide-always-visible-floors').val(alwaysVisibleFloors);
+
+    if (val === 0) {
         unhideAllMessages(true);
-    } else {
-        // 输入为空
-        saveCurrentHideSettings(null);
+    } else if (changed) {
+        runFullHideCheck();
         updateCurrentHideSettingsDisplay();
     }
-}, 800);
+    return true;
+}
+
+function getAlwaysVisibleRanges(settings = getCurrentHideSettings()) {
+    return parseFloorRanges(settings?.alwaysVisibleFloors ?? '');
+}
+
+// 同时更新聊天数据与已渲染楼层；未加载的楼层也能正确取消隐藏。
+function showFloors(chat, floors) {
+    const toShow = floors.filter(floor => chat[floor]?.is_system === true);
+    for (const floor of toShow) chat[floor].is_system = false;
+    if (toShow.length) {
+        $(toShow.map(floor => `.mes[mesid="${floor}"]`).join(',')).attr('is_system', 'false');
+        saveChatDebounced();
+    }
+    return toShow.length;
+}
+
+function unhideSpecifiedMessages() {
+    let ranges;
+    try {
+        ranges = parseFloorRanges($('#hide-unhide-floors').val() ?? '');
+    } catch (error) {
+        toastr.error(error.message);
+        return;
+    }
+    if (!ranges.length) {
+        toastr.warning('请输入需要取消隐藏的楼层或范围，例如 0, 3, 8-12。');
+        return;
+    }
+    const chat = getContextOptimized()?.chat;
+    if (!chat?.length) {
+        toastr.warning('当前没有聊天消息。');
+        return;
+    }
+    const floors = getExistingFloors(ranges, chat.length).filter(floor => chat[floor]);
+    if (!floors.length) {
+        toastr.warning(`指定楼层不在当前聊天中，当前楼层范围为 0-${chat.length - 1}。`);
+        return;
+    }
+    // 先应用待保存配置，避免失焦/关闭面板时立即覆盖本次操作。
+    if (!saveHideSettingsFromInputs()) return;
+    runFullHideCheckDebounced.cancel();
+    const count = showFloors(chat, floors);
+    $('#hide-unhide-floors').val(formatFloorRanges(ranges));
+    if (count) {
+        toastr.success(`已取消 ${count} 条消息的隐藏；后续仍按自动隐藏规则处理。`);
+    } else {
+        toastr.info('指定楼层已经处于未隐藏状态。');
+    }
+}
 
 // 检查是否应该执行隐藏/取消隐藏操作
 function shouldProcessHiding() {
@@ -1084,6 +1172,8 @@ async function runIncrementalHideCheck() {
     const currentChatLength = chat.length;
     const settings = getCurrentHideSettings() || { hideLastN: 0, lastProcessedLength: 0, userConfigured: false };
     const { hideLastN, lastProcessedLength = 0 } = settings;
+    const alwaysVisibleRanges = getAlwaysVisibleRanges(settings);
+    showFloors(chat, getExistingFloors(alwaysVisibleRanges, currentChatLength));
 
     Logger.debug(`【增量隐藏检查】📊 当前状态:`);
     Logger.debug(`【增量隐藏检查】   - 当前聊天长度: ${currentChatLength}`);
@@ -1130,6 +1220,7 @@ async function runIncrementalHideCheck() {
         Logger.debug(`【增量隐藏检查】🔍 扫描消息 [${startIndex}, ${endIndex})...`);
 
         for (let i = startIndex; i < endIndex; i++) {
+            if (includesFloor(alwaysVisibleRanges, i)) continue;
             if (chat[i]) {
                 if (chat[i].is_system !== true) {
                     toHideIncrementally.push(i);
@@ -1151,6 +1242,7 @@ async function runIncrementalHideCheck() {
                     chat[idx].is_system = true;
                 }
             });
+            saveChatDebounced();
             Logger.debug(`【增量隐藏检查】✅ 聊天数组数据已更新`);
 
             // 更新 DOM
@@ -1216,6 +1308,7 @@ async function runFullHideCheck() {
 
     const settings = getCurrentHideSettings() || { hideLastN: 0, lastProcessedLength: 0, userConfigured: false };
     const { hideLastN, lastProcessedLength, userConfigured } = settings;
+    const alwaysVisibleRanges = getAlwaysVisibleRanges(settings);
 
     Logger.debug(`【全量隐藏检查】📋 配置信息:`);
     Logger.debug(`【全量隐藏检查】   - 保留楼层数 N: ${hideLastN}`);
@@ -1248,7 +1341,7 @@ async function runFullHideCheck() {
         }
 
         const isCurrentlyHidden = msg.is_system === true;
-        const shouldBeHidden = i < visibleStart;
+        const shouldBeHidden = i < visibleStart && !includesFloor(alwaysVisibleRanges, i);
 
         if (shouldBeHidden && !isCurrentlyHidden) {
             // 应该隐藏但当前未隐藏 → 需要隐藏
@@ -1302,6 +1395,8 @@ async function runFullHideCheck() {
         Logger.debug(`【全量隐藏检查】ℹ️  无需更改聊天数据或 DOM`);
     }
 
+    if (changed) saveChatDebounced();
+
     // 保存设置
     if (userConfigured && lastProcessedLength !== currentChatLength) {
         Logger.debug(`【全量隐藏检查】💾 长度变化 (${lastProcessedLength} -> ${currentChatLength})，保存设置`);
@@ -1343,6 +1438,7 @@ async function unhideAllMessages(isFromInputZero = false) {
         const selector = $('.mes[is_system="true"]');
         const domCount = selector.length;
         selector.attr('is_system', 'false');
+        if (unhiddenCount > 0) saveChatDebounced();
 
         Logger.debug(`【取消所有隐藏】✅ 已取消所有消息的隐藏状态`);
         Logger.debug(`【取消所有隐藏】   - 聊天数组更新: ${unhiddenCount} 条`);
@@ -2032,40 +2128,8 @@ function setupEventListeners() {
         Logger.debug('');
         Logger.debug('🚪🚪🚪【关闭弹窗】开始 🚪🚪🚪');
 
-        // 确保输入框的设置已保存
-        const $input = $('#hide-last-n');
-        const inputVal = $input.val();
-        const val = parseInt(inputVal);
-
-        Logger.debug(`【关闭弹窗】📋 输入框状态:`);
-        Logger.debug(`【关闭弹窗】   - 原始值: "${inputVal}"`);
-        Logger.debug(`【关闭弹窗】   - 解析后: ${val}`);
-        Logger.debug(`【关闭弹窗】   - 是否有效: ${!isNaN(val) && val >= 0}`);
-
-        if (!isNaN(val) && val >= 0) {
-            Logger.debug(`【关闭弹窗】💾 立即保存隐藏设置，值=${val}`);
-
-            if (val > 0) {
-                saveCurrentHideSettings(val);
-            } else {
-                saveCurrentHideSettings(null);
-            }
-
-            updateCurrentHideSettingsDisplay();
-
-            // 立即执行隐藏检查，不使用防抖
-            const settings = extension_settings[extensionName];
-            if (settings?.enabled && settings?.autoHideEnabled) {
-                Logger.debug(`【关闭弹窗】🔍 插件已启用且自动隐藏已开启，立即执行全量隐藏检查`);
-                runFullHideCheck();
-            } else {
-                Logger.debug(`【关闭弹窗】⛔ 插件或自动隐藏未启用，跳过隐藏检查`);
-                Logger.debug(`【关闭弹窗】   - enabled: ${settings?.enabled}`);
-                Logger.debug(`【关闭弹窗】   - autoHideEnabled: ${settings?.autoHideEnabled}`);
-            }
-        } else {
-            Logger.debug(`【关闭弹窗】⚠️  输入值无效 (${inputVal})，跳过保存`);
-        }
+        // 仅在配置变化时重新应用规则，保留刚执行的一次性取消隐藏结果。
+        if (!saveHideSettingsFromInputs()) return;
 
         $('#hide-helper-popup').hide();
         $('#hide-helper-backdrop').hide();
@@ -2335,16 +2399,24 @@ function setupEventListeners() {
         Logger.debug('');
     });
 
-    // 2. 修改：输入框失去焦点时才保存，避免输入过程中频繁触发保存
-    $('#hide-last-n').on('blur', function() {
-        saveSettingsAutoDebounced();
+    // 输入框失去焦点时立即保存，避免设置跨角色/模式串写。
+    $('#hide-last-n, #hide-always-visible-floors').on('blur', function() {
+        saveHideSettingsFromInputs();
     });
 
     // 回车键让输入框失去焦点，触发保存
-    $('#hide-last-n').on('keydown', function(e) {
+    $('#hide-last-n, #hide-always-visible-floors').on('keydown', function(e) {
         if (e.key === 'Enter') {
             e.preventDefault();
             this.blur(); // 失去焦点会触发 blur 事件进而保存
+        }
+    });
+
+    $('#hide-unhide-floors-btn').on('click', unhideSpecifiedMessages);
+    $('#hide-unhide-floors').on('keydown', function(e) {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            unhideSpecifiedMessages();
         }
     });
 
@@ -2447,6 +2519,7 @@ function setupEventListeners() {
         Logger.debug('');
         Logger.debug('📢【事件】CHAT_CHANGED - 聊天已切换');
         cachedContext = null; // 清理缓存
+        $('#hide-unhide-floors').val('');
 
         updateCurrentHideSettingsDisplay(); // 更新所有UI
 
@@ -2625,7 +2698,7 @@ jQuery(async () => {
     }
 });
 
-// 兜底拦截：在 API 请求前硬性截断 chat 数组，确保只有最近 N 条消息被发送
+// 未配置保留例外时沿用原来的请求截断；有例外时由 is_system 隐藏规则筛选。
 globalThis.HideHelper_interceptGeneration = function (chat) {
     const settings = extension_settings[extensionName];
     if (!settings?.enabled) return;
@@ -2635,6 +2708,10 @@ globalThis.HideHelper_interceptGeneration = function (chat) {
 
     const hideSettings = getCurrentHideSettings();
     if (!hideSettings?.userConfigured || !hideSettings.hideLastN || hideSettings.hideLastN <= 0) return;
+
+    // 请求数组已过滤隐藏消息且可能经过其他扩展处理，索引不再是原始楼层号。
+    // 此时不能按 N 截断，否则会再次删掉已保留的旧楼层。
+    if (getAlwaysVisibleRanges(hideSettings).length) return;
 
     const originalLength = chat.length;
     const targetLength = hideSettings.hideLastN;

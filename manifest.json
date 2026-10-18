@@ -6,6 +6,6 @@
     "js": "index.js",
     "css": "style.css",
     "author": "uhhhh15",
-    "version": "3.9.2",
-    "description": "高效批量隐藏/显示消息的工具"
+    "version": "3.9.3",
+    "description": "高效批量隐藏/显示消息，支持指定楼层始终保留及按范围取消隐藏"
 }

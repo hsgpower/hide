@@ -1,0 +1,13 @@
+{
+  "name": "sillytavern-hide",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --experimental-vm-modules --test tests/*.test.mjs",
+    "check": "node --check index.js && node --check floor-ranges.js && npm test"
+  },
+  "devDependencies": {
+    "jquery": "3.7.1",
+    "jsdom": "26.1.0"
+  }
+}
