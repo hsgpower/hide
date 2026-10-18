@@ -5,7 +5,8 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "uhhhh15",
-    "version": "3.9.3",
-    "description": "高效批量隐藏/显示消息，支持指定楼层始终保留及按范围取消隐藏"
+    "author": "hsgpower (original: uhhhh15)",
+    "version": "4.0.0",
+    "homePage": "https://github.com/hsgpower/hide",
+    "description": "简洁的楼层管理：总开关、指定隐藏、锁定保留、取消隐藏和状态查询"
 }

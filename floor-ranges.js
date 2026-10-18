@@ -6,7 +6,7 @@ export function parseFloorRanges(value = '') {
     if (!input) return [];
 
     const parts = input.split(/[,\s]+/).filter(Boolean);
-    if (!parts.length) throw new Error('请填写楼层号或范围，清空输入框可移除保留例外。');
+    if (!parts.length) throw new Error('请填写楼层号或范围，例如 0, 3, 8-12。');
     const ranges = parts.map(part => {
         const match = /^(\d+)(?:-(\d+))?$/.exec(part);
         if (!match) {
@@ -18,10 +18,14 @@ export function parseFloorRanges(value = '') {
             throw new Error(`楼层范围无效：${part}。起始楼层不能大于结束楼层，且楼层号不能超出安全整数范围。`);
         }
         return [start, end];
-    }).sort((a, b) => a[0] - b[0]);
+    });
 
+    return mergeFloorRanges(ranges);
+}
+
+export function mergeFloorRanges(ranges) {
     const merged = [];
-    for (const [start, end] of ranges) {
+    for (const [start, end] of [...ranges].sort((a, b) => a[0] - b[0])) {
         const previous = merged[merged.length - 1];
         if (previous && start <= previous[1] + 1) {
             previous[1] = Math.max(previous[1], end);
@@ -30,6 +34,25 @@ export function parseFloorRanges(value = '') {
         }
     }
     return merged;
+}
+
+/** Subtract inclusive intervals without expanding them into individual floors. */
+export function subtractFloorRanges(ranges, removed) {
+    const result = [];
+    const cuts = mergeFloorRanges(removed);
+    for (const [start, end] of mergeFloorRanges(ranges)) {
+        let cursor = start;
+        let exhausted = false;
+        for (const [cutStart, cutEnd] of cuts) {
+            if (cutEnd < cursor) continue;
+            if (cutStart > end) break;
+            if (cutStart > cursor) result.push([cursor, cutStart - 1]);
+            if (cutEnd >= end) { exhausted = true; break; }
+            cursor = cutEnd + 1;
+        }
+        if (!exhausted) result.push([cursor, end]);
+    }
+    return result;
 }
 
 export function formatFloorRanges(ranges) {
