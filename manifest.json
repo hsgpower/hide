@@ -6,7 +6,7 @@
     "js": "index.js",
     "css": "style.css",
     "author": "hsgpower (original: uhhhh15)",
-    "version": "4.0.1",
+    "version": "4.0.2",
     "homePage": "https://github.com/hsgpower/hide",
     "description": "简洁的楼层管理：总开关、指定隐藏、锁定保留、取消隐藏和状态查询"
 }

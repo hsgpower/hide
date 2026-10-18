@@ -149,9 +149,12 @@ function createUI() {
         </div>
     </div>`;
     byId('extensions_settings')?.append(container);
-    const menu = document.createElement('button');
+    const menu = document.createElement('div');
     menu.id = 'hide-open-menu';
-    menu.type = 'button';
+    menu.setAttribute('role', 'button');
+    menu.setAttribute('aria-haspopup', 'dialog');
+    menu.setAttribute('aria-controls', 'hide-panel');
+    menu.tabIndex = 0;
     menu.className = 'list-group-item flex-container flexGap5';
     menu.innerHTML = '<i class="fa-solid fa-eye-slash" aria-hidden="true"></i><span>隐藏助手</span>';
     byId('extensionsMenu')?.append(menu);
@@ -202,6 +205,12 @@ function createUI() {
     document.body.append(dialog);
     container.querySelector('button').addEventListener('click', openPanel);
     menu.addEventListener('click', openPanel);
+    menu.addEventListener('keydown', event => {
+        if (!event.isComposing && !event.repeat && (event.key === 'Enter' || event.key === ' ')) {
+            event.preventDefault();
+            openPanel();
+        }
+    });
     byId('hide-close').addEventListener('click', () => dialog.close());
     byId('hide-apply').addEventListener('click', () => act('hide'));
     byId('hide-unhide').addEventListener('click', () => act('unhide'));
